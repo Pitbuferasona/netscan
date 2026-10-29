@@ -1,21 +1,18 @@
 #!/usr/bin/env python3
 """
-netscan.py - Ferramenta de reconhecimento de rede (scanner) para Kali Linux
-Autor: BY NEGUIN
+netscan.py
+Um scanner de rede simples pra rodar no Kali.
 
-Funcionalidades:
-  - Detecção automática da rede local (interface, IP, CIDR)
-  - Listagem de dispositivos conectados na rede (IP, MAC, hostname)
-  - Descoberta de hosts ativos na rede (ping sweep)
-  - Varredura de portas TCP (scan simples, multithread)
-  - Banner grabbing (identificação básica de serviços)
+O que ele faz:
+  - acha sua rede local sozinho (sem precisar digitar o CIDR)
+  - lista os dispositivos conectados (IP, MAC, hostname)
+  - faz ping sweep pra ver quem tá ativo
+  - escaneia portas TCP e tenta pegar o banner do serviço
 
-USO LEGAL: utilize apenas em redes e sistemas que você tem autorização
-explícita para testar (sua própria rede, laboratório, ou com permissão
-por escrito do responsável). Escanear redes de terceiros sem autorização
-pode ser crime.
+Só funciona em cima da rede/host que você tem autorização pra testar.
+Nada aqui foi pensado pra derrubar nada, é só reconhecimento mesmo.
 
-Dependências: apenas biblioteca padrão do Python 3.
+Não precisa instalar nada além do Python 3 (só stdlib).
 """
 
 import argparse
@@ -28,27 +25,22 @@ import queue
 import time
 from datetime import datetime
 
-# ---------------------------------------------------------------------------
-# Banner ASCII
-# ---------------------------------------------------------------------------
-BANNER = r"""
-  _   _ _____ _____ ____   ____    _    _   _
- | \ | | ____|_   _/ ___| / ___|  / \  | \ | |
- |  \| |  _|   | | \___ \| |     / _ \ |  \| |
- | |\  | |___  | |  ___) | |___ / ___ \| |\  |
- |_| \_|_____| |_| |____/ \____/_/   \_\_| \_|
+# cores do terminal (só duas, pra não poluir)
+class C:
+    RESET = "\033[0m"
+    NEON_GREEN = "\033[1;38;5;46m"   # verde neon - só pro "NEGUIN" do banner
+    DARK_BLUE = "\033[1;38;5;25m"    # azul escuro - resto de tudo
 
-   ███╗   ██╗███████╗████████╗███████╗ ██████╗ █████╗ ███╗   ██╗
-   ████╗  ██║██╔════╝╚══██╔══╝██╔════╝██╔════╝██╔══██╗████╗  ██║
-   ██╔██╗ ██║█████╗     ██║   ███████╗██║     ███████║██╔██╗ ██║
-   ██║╚██╗██║██╔══╝     ██║   ╚════██║██║     ██╔══██║██║╚██╗██║
-   ██║ ╚████║███████╗   ██║   ███████║╚██████╗██║  ██║██║ ╚████║
-   ╚═╝  ╚═══╝╚══════╝   ╚═╝   ╚══════╝ ╚═════╝╚═╝  ╚═╝╚═╝  ╚═══╝
 
-   ┌──────────────────────────────────────────────┐
-   │                BY NEGUIN                      │
-   └──────────────────────────────────────────────┘
-   Scanner de rede (host discovery + port scan)
+# Arte "BY NEGUIN" em bloco grande (fonte 7x7)
+BY_NEGUIN_ART = r"""
+██████   ██   ██    ██   ██  ███████   ██████  ██   ██  ███████  ██   ██
+██   ██  ██   ██    ███  ██  ██       ██       ██   ██     █     ███  ██
+██   ██   ██ ██     ████ ██  ██       ██       ██   ██     █     ████ ██
+██████     ███      ██ ████  █████    ██  ███  ██   ██     █     ██ ████
+██   ██     █       ██  ███  ██       ██   ██  ██   ██     █     ██  ███
+██   ██     █       ██   ██  ██       ██   ██  ██   ██     █     ██   ██
+██████      █       ██   ██  ███████   ██████   █████   ███████  ██   ██
 """
 
 COMMON_PORTS = [21, 22, 23, 25, 53, 80, 110, 111, 135, 139, 143,
@@ -56,12 +48,12 @@ COMMON_PORTS = [21, 22, 23, 25, 53, 80, 110, 111, 135, 139, 143,
 
 
 def print_banner():
-    print(BANNER)
+    print(C.NEON_GREEN + BY_NEGUIN_ART + C.RESET)
+    print(C.DARK_BLUE + "   scanner de rede - host discovery + port scan" + C.RESET)
+    print()
 
 
-# ---------------------------------------------------------------------------
 # Detecção automática da rede local
-# ---------------------------------------------------------------------------
 def get_local_ip():
     """Descobre o IP local usado para sair à internet (não gera tráfego real)."""
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -109,9 +101,7 @@ def get_local_network():
         return None
 
 
-# ---------------------------------------------------------------------------
 # Tabela ARP - MAC address dos dispositivos
-# ---------------------------------------------------------------------------
 def get_arp_table():
     """
     Lê a tabela ARP do sistema (dispositivos já vistos na rede local).
@@ -153,21 +143,16 @@ def resolve_hostname(ip):
         return ""
 
 
-def refresh_arp_entry(ip):
-    """Dispara um ping rápido para forçar a atualização da tabela ARP para esse IP."""
-    ping_host(ip, timeout=1)
-
-
 def list_devices(network_cidr, max_threads=50, timeout=1):
     """
     Lista os dispositivos ativos na rede: IP, MAC e hostname (quando disponível).
     Faz ping sweep primeiro (para popular a tabela ARP) e depois lê a tabela.
     """
-    print(f"[*] Rede detectada/alvo: {network_cidr}\n")
+    print(C.DARK_BLUE + f"[*] Rede detectada/alvo: {network_cidr}\n" + C.RESET)
     active_hosts = host_discovery(network_cidr, max_threads=max_threads,
                                    timeout=timeout)
 
-    print("[*] Consultando tabela ARP para obter endereços MAC...\n")
+    print(C.DARK_BLUE + "[*] Consultando tabela ARP para obter endereços MAC...\n" + C.RESET)
     time.sleep(0.5)  # dá um tempinho pro kernel popular a tabela ARP
     arp_map = get_arp_table()
 
@@ -191,22 +176,20 @@ def list_devices(network_cidr, max_threads=50, timeout=1):
 
     devices.sort(key=lambda d: ipaddress.ip_address(d[0]))
 
-    print("=" * 70)
-    print("DISPOSITIVOS NA REDE - BY NEGUIN".center(70))
-    print("=" * 70)
-    print(f"{'IP':<16}{'MAC Address':<20}{'Hostname':<30}")
-    print("-" * 70)
+    print(C.DARK_BLUE + "=" * 70 + C.RESET)
+    print(C.DARK_BLUE + "DISPOSITIVOS NA REDE".center(70) + C.RESET)
+    print(C.DARK_BLUE + "=" * 70 + C.RESET)
+    print(C.DARK_BLUE + f"{'IP':<16}{'MAC Address':<20}{'Hostname':<30}" + C.RESET)
+    print(C.DARK_BLUE + "-" * 70 + C.RESET)
     for ip, mac, hostname in devices:
         print(f"{ip:<16}{mac:<20}{hostname:<30}")
-    print("-" * 70)
-    print(f"Total: {len(devices)} dispositivo(s) encontrado(s)\n")
+    print(C.DARK_BLUE + "-" * 70 + C.RESET)
+    print(C.DARK_BLUE + f"Total: {len(devices)} dispositivo(s) encontrado(s)\n" + C.RESET)
 
     return devices
 
 
-# ---------------------------------------------------------------------------
 # Ping sweep - descoberta de hosts ativos
-# ---------------------------------------------------------------------------
 def ping_host(ip, timeout=1):
     """Retorna True se o host responder ao ping (ICMP), usando o ping do SO."""
     try:
@@ -225,7 +208,7 @@ def host_discovery(network_cidr, max_threads=50, timeout=1):
     try:
         net = ipaddress.ip_network(network_cidr, strict=False)
     except ValueError as e:
-        print(f"[!] Rede inválida: {e}")
+        print(C.DARK_BLUE + f"[!] Rede inválida: {e}" + C.RESET)
         return []
 
     hosts_to_scan = list(net.hosts())
@@ -244,11 +227,11 @@ def host_discovery(network_cidr, max_threads=50, timeout=1):
             if ping_host(ip, timeout=timeout):
                 with lock:
                     active_hosts.append(str(ip))
-                    print(f"    [+] Host ativo: {ip}")
+                    print(C.DARK_BLUE + f"    [+] Host ativo: {ip}" + C.RESET)
             q.task_done()
 
-    print(f"[*] Iniciando ping sweep em {network_cidr} "
-          f"({len(hosts_to_scan)} hosts)...\n")
+    print(C.DARK_BLUE + f"[*] Iniciando ping sweep em {network_cidr} "
+          f"({len(hosts_to_scan)} hosts)...\n" + C.RESET)
 
     threads = []
     for _ in range(min(max_threads, len(hosts_to_scan) or 1)):
@@ -262,9 +245,7 @@ def host_discovery(network_cidr, max_threads=50, timeout=1):
     return sorted(active_hosts, key=lambda x: ipaddress.ip_address(x))
 
 
-# ---------------------------------------------------------------------------
 # Port scan + banner grabbing
-# ---------------------------------------------------------------------------
 def grab_banner(sock):
     try:
         sock.settimeout(1.0)
@@ -301,7 +282,7 @@ def port_scan(ip, ports=None, max_threads=100, timeout=0.7):
     for p in ports:
         q.put(p)
 
-    print(f"[*] Escaneando {len(ports)} porta(s) em {ip}...\n")
+    print(C.DARK_BLUE + f"[*] Escaneando {len(ports)} porta(s) em {ip}...\n" + C.RESET)
 
     def worker():
         while not q.empty():
@@ -315,8 +296,8 @@ def port_scan(ip, ports=None, max_threads=100, timeout=0.7):
                     open_ports.append(res)
                     port_n, service, banner = res
                     banner_info = f" | banner: {banner}" if banner else ""
-                    print(f"    [+] Porta {port_n}/tcp aberta "
-                          f"({service}){banner_info}")
+                    print(C.DARK_BLUE + f"    [+] Porta {port_n}/tcp aberta "
+                          f"({service}){banner_info}" + C.RESET)
             q.task_done()
 
     threads = []
@@ -333,9 +314,7 @@ def port_scan(ip, ports=None, max_threads=100, timeout=0.7):
     return open_ports
 
 
-# ---------------------------------------------------------------------------
 # Main / CLI
-# ---------------------------------------------------------------------------
 def parse_port_range(port_str):
     """Aceita formatos como '80', '1-1000', '22,80,443'."""
     ports = set()
@@ -353,7 +332,7 @@ def main():
     print_banner()
 
     parser = argparse.ArgumentParser(
-        description="netscan.py - BY NEGUIN | Scanner de rede para uso ético/autorizado"
+        description="netscan.py - scanner de rede simples, uso ético/autorizado apenas"
     )
     parser.add_argument(
         "-t", "--target",
@@ -399,28 +378,28 @@ def main():
                       "detectar a rede automaticamente.")
 
     start_time = datetime.now()
-    print(f"[*] Início: {start_time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+    print(C.DARK_BLUE + f"[*] Início: {start_time.strftime('%Y-%m-%d %H:%M:%S')}\n" + C.RESET)
 
     # Confirmação de autorização
     confirm = input(
         "[!] Confirme que você tem autorização para escanear esta rede/alvo (s/N): "
     ).strip().lower()
     if confirm != "s":
-        print("[!] Operação cancelada. Use apenas em redes/alvos autorizados.")
+        print(C.DARK_BLUE + "[!] Operação cancelada. Use apenas em redes/alvos autorizados." + C.RESET)
         sys.exit(0)
 
     # Modo: listar dispositivos na rede (auto-detecção se -t não informado)
     if args.list_devices:
         network_cidr = args.target or get_local_network()
         if not network_cidr:
-            print("[!] Não foi possível detectar a rede local automaticamente. "
-                  "Informe manualmente com -t 192.168.1.0/24")
+            print(C.DARK_BLUE + "[!] Não foi possível detectar a rede local automaticamente. "
+                  "Informe manualmente com -t 192.168.1.0/24" + C.RESET)
             sys.exit(1)
         list_devices(network_cidr, max_threads=args.threads,
                      timeout=args.timeout)
         elapsed = (datetime.now() - start_time).total_seconds()
-        print(f"[*] Tempo total: {elapsed:.2f}s")
-        print("[*] Finalizado.\n")
+        print(C.DARK_BLUE + f"[*] Tempo total: {elapsed:.2f}s" + C.RESET)
+        print(C.DARK_BLUE + "[*] Finalizado.\n" + C.RESET)
         return
 
     targets = []
@@ -434,7 +413,7 @@ def main():
         targets = [args.target]
 
     if args.discover_only:
-        print("[*] Finalizado (modo somente descoberta).")
+        print(C.DARK_BLUE + "[*] Finalizado (modo somente descoberta)." + C.RESET)
         return
 
     ports = parse_port_range(args.ports) if args.ports else COMMON_PORTS
@@ -445,11 +424,11 @@ def main():
                                  timeout=args.timeout)
 
     # Resumo final
-    print("=" * 60)
-    print("RESUMO FINAL - BY NEGUIN".center(60))
-    print("=" * 60)
+    print(C.DARK_BLUE + "=" * 60 + C.RESET)
+    print(C.DARK_BLUE + "RESUMO FINAL".center(60) + C.RESET)
+    print(C.DARK_BLUE + "=" * 60 + C.RESET)
     for ip, open_ports in results.items():
-        print(f"\nHost: {ip}")
+        print(C.DARK_BLUE + f"\nHost: {ip}" + C.RESET)
         if not open_ports:
             print("  Nenhuma porta aberta encontrada.")
         else:
@@ -459,7 +438,7 @@ def main():
 
     elapsed = (datetime.now() - start_time).total_seconds()
     print(f"\n[*] Tempo total: {elapsed:.2f}s")
-    print("[*] Finalizado.\n")
+    print(C.DARK_BLUE + "[*] Finalizado.\n" + C.RESET)
 
 
 if __name__ == "__main__":
